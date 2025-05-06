@@ -25,13 +25,23 @@ app.get('/api/search', async (req, res) => {
     }
 
     try {
-        const results = [];
-        // 这里先返回模拟数据
-        results.push({
-            title: `${query}的做法`,
-            source: '下厨房',
-            url: 'https://www.xiachufang.com'
-        });
+        const results = [
+            {
+                title: `${query}的做法`,
+                source: '下厨房',
+                url: `https://www.xiachufang.com/search/?keyword=${encodeURIComponent(query)}`
+            },
+            {
+                title: `家常${query}的做法`,
+                source: '美食天下',
+                url: `https://www.meishij.net/search.php?q=${encodeURIComponent(query)}`
+            },
+            {
+                title: `${query}的详细做法`,
+                source: '豆果美食',
+                url: `https://www.douguo.com/search/${encodeURIComponent(query)}`
+            }
+        ];
 
         res.json(results);
     } catch (error) {
