@@ -1,15 +1,11 @@
-{
-    "version": 2,
-    "builds": [
-        {
-            "src": "server.js",
-            "use": "@vercel/node"
-        }
-    ],
-    "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "server.js"
-        }
-    ]
-}
+// ... existing code ...
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Add root path handler
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Cache object
+// ... existing code ...
