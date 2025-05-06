@@ -5,27 +5,27 @@ const cheerio = require('cheerio');
 
 const app = express();
 
-// 启用 CORS
+// Enable CORS
 app.use(cors());
 app.use(express.json());
 
-// 缓存对象
+// Cache object
 const cache = {
     recipes: new Map(),
     searchResults: new Map()
 };
 
-// 缓存过期时间（5分钟）
+// Cache expiry time (5 minutes)
 const CACHE_EXPIRY = 5 * 60 * 1000;
 
-// 目标网站列表
+// Target websites
 const targetSites = [
     'https://www.xiachufang.com',
     'https://www.meishij.net',
     'https://www.douguo.com'
 ];
 
-// 通用请求头
+// Common headers
 const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -34,9 +34,9 @@ const headers = {
     'Pragma': 'no-cache'
 };
 
-// 抓取网页内容
+// Fetch webpage content
 async function fetchRecipeContent(url) {
-    // 检查缓存
+    // Check cache
     const cached = cache.recipes.get(url);
     if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY) {
         return cached.data;
@@ -47,7 +47,7 @@ async function fetchRecipeContent(url) {
         const $ = cheerio.load(response.data);
         
         let content = null;
-        // 根据不同网站解析内容
+        // Parse content based on different websites
         if (url.includes('xiachufang.com')) {
             content = {
                 title: $('.page-title').text().trim(),
@@ -71,7 +71,7 @@ async function fetchRecipeContent(url) {
             };
         }
 
-        // 存入缓存
+        // Store in cache
         if (content) {
             cache.recipes.set(url, {
                 data: content,
@@ -81,20 +81,20 @@ async function fetchRecipeContent(url) {
 
         return content;
     } catch (error) {
-        console.error('抓取内容出错:', error);
+        console.error('Error fetching content:', error);
         return null;
     }
 }
 
-// 搜索API
+// Search API
 app.get('/api/search', async (req, res) => {
     const { query } = req.query;
     
     if (!query) {
-        return res.status(400).json({ error: '请提供搜索关键词' });
+        return res.status(400).json({ error: 'Please provide a search keyword' });
     }
 
-    // 检查缓存
+    // Check cache
     const cached = cache.searchResults.get(query);
     if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY) {
         return res.json(cached.data);
@@ -103,26 +103,26 @@ app.get('/api/search', async (req, res) => {
     try {
         const results = [
             {
-                title: `${query}的做法`,
-                source: '下厨房',
+                title: `How to Make ${query}`,
+                source: 'Xiachufang',
                 url: `https://www.xiachufang.com/search/?keyword=${encodeURIComponent(query)}`,
                 content: null
             },
             {
-                title: `家常${query}的做法`,
-                source: '美食天下',
+                title: `Homemade ${query} Recipe`,
+                source: 'Meishij',
                 url: `https://www.meishij.net/search.php?q=${encodeURIComponent(query)}`,
                 content: null
             },
             {
-                title: `${query}的详细做法`,
-                source: '豆果美食',
+                title: `Detailed ${query} Recipe`,
+                source: 'Douguo',
                 url: `https://www.douguo.com/search/${encodeURIComponent(query)}`,
                 content: null
             }
         ];
 
-        // 存入缓存
+        // Store in cache
         cache.searchResults.set(query, {
             data: results,
             timestamp: Date.now()
@@ -130,22 +130,22 @@ app.get('/api/search', async (req, res) => {
 
         res.json(results);
 
-        // 异步加载详细内容
+        // Asynchronously load detailed content
         results.forEach(async (result) => {
             result.content = await fetchRecipeContent(result.url);
         });
     } catch (error) {
-        console.error('搜索出错:', error);
-        res.status(500).json({ error: '搜索服务出错' });
+        console.error('Search error:', error);
+        res.status(500).json({ error: 'Search service error' });
     }
 });
 
-// 获取菜谱详情API
+// Get recipe details API
 app.get('/api/recipe', async (req, res) => {
     const { url } = req.query;
     
     if (!url) {
-        return res.status(400).json({ error: '请提供菜谱URL' });
+        return res.status(400).json({ error: 'Please provide a recipe URL' });
     }
 
     try {
@@ -153,18 +153,18 @@ app.get('/api/recipe', async (req, res) => {
         if (content) {
             res.json(content);
         } else {
-            res.status(404).json({ error: '无法获取菜谱内容' });
+            res.status(404).json({ error: 'Unable to fetch recipe content' });
         }
     } catch (error) {
-        console.error('获取菜谱详情出错:', error);
-        res.status(500).json({ error: '获取菜谱详情失败' });
+        console.error('Error fetching recipe details:', error);
+        res.status(500).json({ error: 'Failed to fetch recipe details' });
     }
 });
 
-// 健康检查端点
+// Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 
-// 导出 app 而不是直接监听
+// Export app instead of direct listening
 module.exports = app;
