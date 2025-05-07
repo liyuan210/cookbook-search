@@ -55,7 +55,9 @@ app.use((req, res, next) => {
 
 // 静态文件服务
 app.use(express.static(path.join(__dirname)));
-
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'index.html'));
+});
 // 缓存对象
 const cache = {
     recipes: new Map(),
