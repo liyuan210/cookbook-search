@@ -2,30 +2,92 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const path = require('path');
+const rateLimit = require('express-rate-limit');
+const compression = require('compression');
+const winston = require('winston');
+require('dotenv').config();
+
+// 环境变量配置
+const config = {
+    NODE_ENV: process.env.NODE_ENV || 'development',
+    PORT: process.env.PORT || 3000,
+    CACHE_EXPIRY: parseInt(process.env.CACHE_EXPIRY) || 5 * 60 * 1000,
+    LOG_LEVEL: process.env.LOG_LEVEL || 'info'
+};
+
+// 配置 Winston 日志
+const logger = winston.createLogger({
+    level: config.LOG_LEVEL,
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+    ),
+    transports: [
+        new winston.transports.Console({
+            format: winston.format.simple()
+        })
+    ]
+});
 
 const app = express();
 
-// Enable CORS
+// 基础中间件
 app.use(cors());
 app.use(express.json());
+app.use(compression());
 
-// Cache object
+// 速率限制
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15分钟
+    max: 100 // 限制每个IP 15分钟内最多100个请求
+});
+app.use(limiter);
+
+// 请求日志中间件
+app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.url}`, {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    });
+    next();
+});
+
+// 静态文件服务
+app.use(express.static(path.join(__dirname)));
+
+// 缓存对象
 const cache = {
     recipes: new Map(),
     searchResults: new Map()
 };
 
-// Cache expiry time (5 minutes)
-const CACHE_EXPIRY = 5 * 60 * 1000;
+// 缓存清理函数
+const cleanupCache = () => {
+    const now = Date.now();
+    for (const [key, value] of cache.recipes) {
+        if (now - value.timestamp > config.CACHE_EXPIRY) {
+            cache.recipes.delete(key);
+        }
+    }
+    for (const [key, value] of cache.searchResults) {
+        if (now - value.timestamp > config.CACHE_EXPIRY) {
+            cache.searchResults.delete(key);
+        }
+    }
+};
 
-// Target websites
+// 定期清理缓存
+setInterval(cleanupCache, config.CACHE_EXPIRY);
+
+// 目标网站
 const targetSites = [
     'https://www.xiachufang.com',
     'https://www.meishij.net',
     'https://www.douguo.com'
 ];
 
-// Common headers
+// 通用请求头
 const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -34,20 +96,28 @@ const headers = {
     'Pragma': 'no-cache'
 };
 
-// Fetch webpage content
+// 获取网页内容
 async function fetchRecipeContent(url) {
-    // Check cache
+    logger.info(`Fetching content from: ${url}`);
+    
+    // 检查缓存
     const cached = cache.recipes.get(url);
-    if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY) {
+    if (cached && Date.now() - cached.timestamp < config.CACHE_EXPIRY) {
+        logger.info('Returning cached content');
         return cached.data;
     }
 
     try {
-        const response = await axios.get(url, { headers });
+        logger.info('Making HTTP request...');
+        const response = await axios.get(url, { 
+            headers,
+            timeout: 5000 // 5秒超时
+        });
+        logger.info('Response received, parsing content...');
         const $ = cheerio.load(response.data);
         
         let content = null;
-        // Parse content based on different websites
+        // 根据不同网站解析内容
         if (url.includes('xiachufang.com')) {
             content = {
                 title: $('.page-title').text().trim(),
@@ -71,58 +141,65 @@ async function fetchRecipeContent(url) {
             };
         }
 
-        // Store in cache
+        // 存储到缓存
         if (content) {
+            logger.info('Content parsed successfully, storing in cache');
             cache.recipes.set(url, {
                 data: content,
                 timestamp: Date.now()
             });
+        } else {
+            logger.warn('No content found');
         }
 
         return content;
     } catch (error) {
-        console.error('Error fetching content:', error);
+        logger.error('Error fetching content:', {
+            error: error.message,
+            stack: error.stack,
+            url
+        });
         return null;
     }
 }
 
-// Search API
+// 搜索 API
 app.get('/api/search', async (req, res) => {
-    const { query } = req.query;
+    const query = req.query.query;
     
     if (!query) {
-        return res.status(400).json({ error: 'Please provide a search keyword' });
+        return res.status(400).json({ error: '请提供搜索关键词' });
     }
 
-    // Check cache
+    // 检查缓存
     const cached = cache.searchResults.get(query);
-    if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY) {
+    if (cached && Date.now() - cached.timestamp < config.CACHE_EXPIRY) {
         return res.json(cached.data);
     }
 
     try {
         const results = [
             {
-                title: `How to Make ${query}`,
+                title: `${query}的做法`,
                 source: 'Xiachufang',
                 url: `https://www.xiachufang.com/search/?keyword=${encodeURIComponent(query)}`,
                 content: null
             },
             {
-                title: `Homemade ${query} Recipe`,
+                title: `${query}的做法大全`,
                 source: 'Meishij',
-                url: `https://www.meishij.net/search.php?q=${encodeURIComponent(query)}`,
+                url: `https://www.meishij.net/so/${encodeURIComponent(query)}`,
                 content: null
             },
             {
-                title: `Detailed ${query} Recipe`,
+                title: `${query}的做法步骤`,
                 source: 'Douguo',
                 url: `https://www.douguo.com/search/${encodeURIComponent(query)}`,
                 content: null
             }
         ];
 
-        // Store in cache
+        // 存储到缓存
         cache.searchResults.set(query, {
             data: results,
             timestamp: Date.now()
@@ -130,22 +207,26 @@ app.get('/api/search', async (req, res) => {
 
         res.json(results);
 
-        // Asynchronously load detailed content
+        // 异步加载详细内容
         results.forEach(async (result) => {
             result.content = await fetchRecipeContent(result.url);
         });
     } catch (error) {
-        console.error('Search error:', error);
-        res.status(500).json({ error: 'Search service error' });
+        logger.error('Search error:', {
+            error: error.message,
+            stack: error.stack,
+            query
+        });
+        res.status(500).json({ error: '搜索服务错误' });
     }
 });
 
-// Get recipe details API
+// 获取食谱详情 API
 app.get('/api/recipe', async (req, res) => {
     const { url } = req.query;
     
     if (!url) {
-        return res.status(400).json({ error: 'Please provide a recipe URL' });
+        return res.status(400).json({ error: '请提供食谱URL' });
     }
 
     try {
@@ -153,18 +234,66 @@ app.get('/api/recipe', async (req, res) => {
         if (content) {
             res.json(content);
         } else {
-            res.status(404).json({ error: 'Unable to fetch recipe content' });
+            res.status(404).json({ error: '无法获取食谱内容' });
         }
     } catch (error) {
-        console.error('Error fetching recipe details:', error);
-        res.status(500).json({ error: 'Failed to fetch recipe details' });
+        logger.error('Error fetching recipe details:', {
+            error: error.message,
+            stack: error.stack,
+            url
+        });
+        res.status(500).json({ error: '获取食谱详情失败' });
     }
 });
 
-// Health check endpoint
+// 健康检查端点
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ 
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        environment: config.NODE_ENV,
+        config: {
+            NODE_ENV: config.NODE_ENV,
+            PORT: config.PORT,
+            CACHE_EXPIRY: config.CACHE_EXPIRY,
+            LOG_LEVEL: config.LOG_LEVEL
+        }
+    });
 });
 
-// Export app instead of direct listening
+// 错误处理中间件
+app.use((err, req, res, next) => {
+    const errorResponse = {
+        error: 'Internal Server Error',
+        message: err.message,
+        timestamp: new Date().toISOString(),
+        environment: config.NODE_ENV
+    };
+    
+    if (config.NODE_ENV === 'development') {
+        errorResponse.stack = err.stack;
+    }
+    
+    logger.error('Error occurred:', {
+        error: err.message,
+        stack: err.stack,
+        path: req.path,
+        method: req.method
+    });
+    
+    res.status(err.status || 500).json(errorResponse);
+});
+
+// 404 处理器
+app.use((req, res) => {
+    logger.warn('404 Not Found:', { path: req.url });
+    res.status(404).json({ 
+        error: 'Not Found',
+        path: req.url,
+        timestamp: new Date().toISOString(),
+        environment: config.NODE_ENV
+    });
+});
+
+// 导出 Vercel serverless 函数
 module.exports = app;
