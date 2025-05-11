@@ -1,7 +1,7 @@
 {
-  "name": "cookbook-search",
+  "name": "cookbook-server",
   "version": "1.0.0",
-  "description": "菜谱搜索服务",
+  "description": "菜谱搜索后端服务",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
