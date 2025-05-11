@@ -55,8 +55,10 @@ app.use((req, res, next) => {
 
 // 静态文件服务
 app.use(express.static(path.join(__dirname)));
+
+// 根路由处理
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'index.html'));
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // 缓存对象
@@ -168,7 +170,7 @@ async function fetchRecipeContent(url) {
 
 // 搜索 API
 app.get('/api/search', async (req, res) => {
-    const query = req.query.q || req.query.query; // 支持两种参数名
+    const query = req.query.q || req.query.query;
     
     if (!query) {
         return res.status(400).json({ error: '请提供搜索关键词' });
@@ -204,11 +206,11 @@ app.get('/api/search', async (req, res) => {
 
         // 存储到缓存
         cache.searchResults.set(query, {
-            data: results,
+            data: { recipes: results },
             timestamp: Date.now()
         });
 
-        res.json({ recipes: results }); // 修改返回格式以匹配前端期望
+        res.json({ recipes: results });
 
         // 异步加载详细内容
         results.forEach(async (result) => {
@@ -226,4 +228,10 @@ app.get('/api/search', async (req, res) => {
         });
         res.status(500).json({ error: '搜索服务错误' });
     }
+});
+
+// 启动服务器
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+    logger.info(`Server is running on port ${port}`);
 });
