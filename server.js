@@ -58,6 +58,7 @@ app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'index.html'));
 });
+
 // 缓存对象
 const cache = {
     recipes: new Map(),
@@ -167,7 +168,7 @@ async function fetchRecipeContent(url) {
 
 // 搜索 API
 app.get('/api/search', async (req, res) => {
-    const query = req.query.query;
+    const query = req.query.q || req.query.query; // 支持两种参数名
     
     if (!query) {
         return res.status(400).json({ error: '请提供搜索关键词' });
@@ -207,11 +208,15 @@ app.get('/api/search', async (req, res) => {
             timestamp: Date.now()
         });
 
-        res.json(results);
+        res.json({ recipes: results }); // 修改返回格式以匹配前端期望
 
         // 异步加载详细内容
         results.forEach(async (result) => {
-            result.content = await fetchRecipeContent(result.url);
+            try {
+                result.content = await fetchRecipeContent(result.url);
+            } catch (error) {
+                logger.error(`Error fetching content for ${result.url}:`, error);
+            }
         });
     } catch (error) {
         logger.error('Search error:', {
@@ -222,80 +227,3 @@ app.get('/api/search', async (req, res) => {
         res.status(500).json({ error: '搜索服务错误' });
     }
 });
-
-// 获取食谱详情 API
-app.get('/api/recipe', async (req, res) => {
-    const { url } = req.query;
-    
-    if (!url) {
-        return res.status(400).json({ error: '请提供食谱URL' });
-    }
-
-    try {
-        const content = await fetchRecipeContent(url);
-        if (content) {
-            res.json(content);
-        } else {
-            res.status(404).json({ error: '无法获取食谱内容' });
-        }
-    } catch (error) {
-        logger.error('Error fetching recipe details:', {
-            error: error.message,
-            stack: error.stack,
-            url
-        });
-        res.status(500).json({ error: '获取食谱详情失败' });
-    }
-});
-
-// 健康检查端点
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        environment: config.NODE_ENV,
-        config: {
-            NODE_ENV: config.NODE_ENV,
-            PORT: config.PORT,
-            CACHE_EXPIRY: config.CACHE_EXPIRY,
-            LOG_LEVEL: config.LOG_LEVEL
-        }
-    });
-});
-
-// 错误处理中间件
-app.use((err, req, res, next) => {
-    const errorResponse = {
-        error: 'Internal Server Error',
-        message: err.message,
-        timestamp: new Date().toISOString(),
-        environment: config.NODE_ENV
-    };
-    
-    if (config.NODE_ENV === 'development') {
-        errorResponse.stack = err.stack;
-    }
-    
-    logger.error('Error occurred:', {
-        error: err.message,
-        stack: err.stack,
-        path: req.path,
-        method: req.method
-    });
-    
-    res.status(err.status || 500).json(errorResponse);
-});
-
-// 404 处理器
-app.use((req, res) => {
-    logger.warn('404 Not Found:', { path: req.url });
-    res.status(404).json({ 
-        error: 'Not Found',
-        path: req.url,
-        timestamp: new Date().toISOString(),
-        environment: config.NODE_ENV
-    });
-});
-
-// 导出 Vercel serverless 函数
-module.exports = app;
